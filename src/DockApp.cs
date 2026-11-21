@@ -650,6 +650,7 @@ namespace MyDock
         private int _prevTickMs;
         private const int FRAME_MS = 10;                 // 动画帧间隔（≈100fps）
         private Rectangle _barRect;                     // 白条所在区域（自绘 + 右键命中）
+        private int _barClickTick;                      // 上一次点白条的时刻，用来判定双击
         private Rectangle _bgRect;                      // 背景底卡：只包住图标那一排，白条在它外面
         private Bitmap _buf;                            // 分层窗口的离屏画布
         private Bitmap _gloss;                          // 底卡顶部高光（带抖动，消除灰度阶梯）
@@ -2305,7 +2306,8 @@ namespace MyDock
 
             if (e.Button == MouseButtons.Right)
             {
-                _rOnBar = _barRect.Contains(e.Location);
+                // 右键：白条和底卡上任何位置都弹菜单，只有真正透明的区域才交给桌面
+                _rOnBar = _barRect.Contains(e.Location) || _bgRect.Contains(e.Location);
                 return;
             }
             if (e.Button != MouseButtons.Left) return;
@@ -2326,6 +2328,19 @@ namespace MyDock
 
             if (_barRect.Contains(e.Location))
             {
+                // 双击白条 = 打开桌面图标文件夹（锁定位置时也照样能双击）
+                int now = Environment.TickCount;
+                if (_barClickTick != 0 && now - _barClickTick < 420 && now >= _barClickTick)
+                {
+                    _barClickTick = 0;
+                    _t = 1f; _tb = 1f;
+                    Render();
+                    OpenDesktop();
+                    Log.Write("bar dblclick open desktop");
+                    return;
+                }
+                _barClickTick = now;
+
                 if (_locked) return;   // 锁定后白条不再响应拖动，位置固定
                 _dragging = true;
                 _t = 1f; _tb = 1f;

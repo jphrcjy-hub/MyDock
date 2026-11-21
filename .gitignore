@@ -1,0 +1,15 @@
+# 运行期数据，不要提交
+dock.ini
+dock.ini.bak
+dock.log
+items/*.lnk
+items/order.txt
+
+# 编译临时产物
+*.obj
+*.pdb
+*.ilk
+_new*.exe
+_rel*.exe
+bin/
+obj/

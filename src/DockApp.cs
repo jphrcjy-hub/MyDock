@@ -583,6 +583,63 @@ namespace MyDock
         }
     }
 
+    // ---------------------------------------------------------------- 悬停名字小气泡
+    internal class NameChip : Form
+    {
+        private string _txt = "";
+
+        public NameChip()
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            DoubleBuffered = true;
+            BackColor = Color.FromArgb(32, 33, 36);
+            Font = new Font("Microsoft YaHei UI", 9f);
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000;   // WS_EX_NOACTIVATE
+                cp.ExStyle |= 0x00000080;   // WS_EX_TOOLWINDOW
+                return cp;
+            }
+        }
+
+        public void SetText(string text)
+        {
+            _txt = text == null ? "" : text;
+            Size sz = TextRenderer.MeasureText(_txt, Font, new Size(400, 60), TextFormatFlags.NoPadding);
+            int w = sz.Width + 24;
+            int h = sz.Height + 10;
+            if (w < 40) w = 40;
+            ClientSize = new Size(w, h);
+            Invalidate();
+        }
+
+        public void ShowNoActivate()
+        {
+            if (!Visible) Show();
+            else { Invalidate(); }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath p = Gfx.Round(new Rectangle(0, 0, Width - 1, Height - 1), Math.Min(9, Height / 2)))
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(238, 32, 33, 36)))
+                g.FillPath(b, p);
+            TextRenderer.DrawText(g, _txt, Font, new Rectangle(0, 0, Width, Height), Color.FromArgb(240, 240, 240),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        }
+    }
+
     // ---------------------------------------------------------------- 主体
     internal class DockForm : Form
     {
@@ -669,6 +726,7 @@ namespace MyDock
         private bool _pvOn;
         private readonly List<DockItem> _items = new List<DockItem>();
         private readonly ToolTip _tip = new ToolTip();
+        private int _tipIdx = -1;
         private DockMenu _menu;
 
         private string _rootDir;
@@ -1210,7 +1268,11 @@ namespace MyDock
                         delegate(int count, int icon, int gap) { return MaxBarPct(count, icon, gap); }, _alphaPct))
                 {
                     f.Changed += delegate { QueuePreview(f); };
-                    DialogResult r = f.ShowDialog();
+                    // 设置窗打开期间自己先不置顶，不然顶在最上面会把设置窗压住；关掉后恢复
+                    TopMost = false;
+                    DialogResult r;
+                    try { r = f.ShowDialog(); }
+                    finally { TopMost = true; }
                     if (_pvTimer != null) _pvTimer.Stop();
                     _pvOn = false;
                     if (r == DialogResult.OK)
@@ -2178,6 +2240,46 @@ namespace MyDock
 
             for (int i = 0; i < _items.Count; i++)
                 _items[i].Hover = (i == hit);
+
+            // 悬停时在图标旁边报出名字，文件夹也能看出是哪个
+            if (hit != _tipIdx)
+            {
+                _tipIdx = hit;
+                try
+                {
+                    if (hit >= 0)
+                    {
+                        string nm = Path.GetFileNameWithoutExtension(_items[hit].TargetPath);
+                        ShowNameChip(nm, _items[hit].R);
+                    }
+                    else HideNameChip();
+                }
+                catch { }
+            }
+        }
+
+        private NameChip _chip;
+
+        private void ShowNameChip(string text, Rectangle iconClient)
+        {
+            if (_chip == null) _chip = new NameChip();
+            _chip.SetText(text);
+            Point sp = PointToScreen(new Point(iconClient.X, iconClient.Y));
+            Rectangle work = Screen.FromPoint(sp).WorkingArea;
+            int x = sp.X + iconClient.Width / 2 - _chip.Width / 2;
+            int y = (_edge == DockEdge.Top) ? sp.Y + iconClient.Height + 6 : sp.Y - _chip.Height - 6;
+            if (x < work.Left + 2) x = work.Left + 2;
+            if (x + _chip.Width > work.Right) x = work.Right - _chip.Width;
+            if (y < work.Top + 2) y = work.Top + 2;
+            if (y + _chip.Height > work.Bottom) y = work.Bottom - _chip.Height;
+            _chip.SetBounds(x, y, _chip.Width, _chip.Height);
+            _chip.ShowNoActivate();
+        }
+
+        private void HideNameChip()
+        {
+            try { if (_chip != null && _chip.Visible) _chip.Hide(); }
+            catch { }
         }
 
         // 只推进“放大总强度”这一个 0~1 的标量：进出时平滑升降，
@@ -2584,7 +2686,12 @@ namespace MyDock
                 object sc = shellType.InvokeMember("CreateShortcut",
                     System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
                 Type scType = sc.GetType();
-                if (File.Exists(target))
+                if (Directory.Exists(target))
+                {
+                    // 文件夹直接当目标：图标就是真实的黄文件夹，属性里也显示原目录
+                    scType.InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, sc, new object[] { target });
+                }
+                else if (File.Exists(target))
                 {
                     scType.InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, sc, new object[] { target });
                     scType.InvokeMember("IconLocation", System.Reflection.BindingFlags.SetProperty, null, sc, new object[] { target + ",0" });

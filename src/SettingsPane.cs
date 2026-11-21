@@ -1084,6 +1084,33 @@ namespace MyDock
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr h);
+
+        // 打开时先把自己顶到最前（用一下置顶再放开），之后按普通窗口走，被别的窗口盖住属正常
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            try
+            {
+                TopMost = true;
+                Activate();
+                BringToFront();
+                SetForegroundWindow(Handle);
+            }
+            catch { }
+            Timer t = new Timer();
+            t.Interval = 900;
+            t.Tick += delegate
+            {
+                t.Stop();
+                t.Dispose();
+                try { if (!IsDisposed) TopMost = false; }
+                catch { }
+            };
+            t.Start();
+        }
+
         // Win11：让系统给窗口做圆角 + 投影；老系统上退化成"直角色块"，所以下面再补一层圆角区域兜底
         protected override void OnHandleCreated(EventArgs e)
         {

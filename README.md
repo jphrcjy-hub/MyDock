@@ -6,6 +6,11 @@
 
 ![设置窗口](docs/settings.png)
 
+## 下载
+
+- 直接下载最新 EXE：[MyDock.exe](https://github.com/jphrcjy-hub/MyDock/releases/latest/download/MyDock.exe)（单文件，免安装）
+- 全部版本见 [Releases](https://github.com/jphrcjy-hub/MyDock/releases)
+
 ## 特性
 
 - **四边吸附**：左 / 右 / 上 / 下都能停靠，自动跟随工作区（避开任务栏）

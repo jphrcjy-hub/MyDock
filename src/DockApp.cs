@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -586,16 +587,20 @@ namespace MyDock
     // ---------------------------------------------------------------- 悬停名字小气泡
     internal class NameChip : Form
     {
+        private const int MARGIN = 10;   // 阴影留白
+        private const int PADX = 11;
+        private const int PADY = 6;
         private string _txt = "";
+        private Bitmap _buf;
+        private Font _font = new Font("Microsoft YaHei UI", 9f);
 
         public NameChip()
         {
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            DoubleBuffered = true;
-            BackColor = Color.FromArgb(32, 33, 36);
-            Font = new Font("Microsoft YaHei UI", 9f);
+            TopMost = true;
+            DoubleBuffered = false;
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -605,38 +610,154 @@ namespace MyDock
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x08000000;   // WS_EX_NOACTIVATE
                 cp.ExStyle |= 0x00000080;   // WS_EX_TOOLWINDOW
+                cp.ExStyle |= 0x08000000;   // WS_EX_NOACTIVATE
+                cp.ExStyle |= 0x00080000;   // WS_EX_LAYERED
+                cp.ExStyle |= 0x00000008;   // WS_EX_TOPMOST
                 return cp;
             }
         }
 
+        protected override void OnPaint(PaintEventArgs e) { }
+        protected override void OnPaintBackground(PaintEventArgs e) { }
+
         public void SetText(string text)
         {
             _txt = text == null ? "" : text;
-            Size sz = TextRenderer.MeasureText(_txt, Font, new Size(400, 60), TextFormatFlags.NoPadding);
-            int w = sz.Width + 24;
-            int h = sz.Height + 10;
-            if (w < 40) w = 40;
-            ClientSize = new Size(w, h);
-            Invalidate();
+            int tw, th;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                StringFormat sf = new StringFormat(StringFormatFlags.NoWrap | StringFormatFlags.NoClip);
+                SizeF s = g.MeasureString(_txt, _font, new PointF(0, 0), sf);
+                sf.Dispose();
+                tw = (int)Math.Ceiling(s.Width);
+                th = (int)Math.Ceiling(s.Height);
+            }
+            int bw = tw + PADX * 2;
+            if (bw < 30) bw = 30;
+            int bh = th + PADY * 2;
+            Size sz = new Size(bw + MARGIN * 2, bh + MARGIN * 2);
+            if (Size != sz)
+            {
+                Size = sz;
+                if (_buf != null) { _buf.Dispose(); _buf = null; }
+            }
         }
 
         public void ShowNoActivate()
         {
-            if (!Visible) Show();
-            else { Invalidate(); }
+            Visible = true;
+            RaiseTopMost();
+            Render();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        public void HideChip()
         {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath p = Gfx.Round(new Rectangle(0, 0, Width - 1, Height - 1), Math.Min(9, Height / 2)))
-            using (SolidBrush b = new SolidBrush(Color.FromArgb(238, 32, 33, 36)))
-                g.FillPath(b, p);
-            TextRenderer.DrawText(g, _txt, Font, new Rectangle(0, 0, Width, Height), Color.FromArgb(240, 240, 240),
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+            Visible = false;
+        }
+
+        private void RaiseTopMost()
+        {
+            if (!IsHandleCreated) return;
+            try { SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); }
+            catch { }
+        }
+
+        // 小圆角气泡：柔阴影 + 细描边 + 跟随系统深浅色，和右键菜单同一套语言
+        private void Render()
+        {
+            if (!IsHandleCreated || Width <= 0 || Height <= 0) return;
+            try
+            {
+                bool light = Theme.IsLight();
+                if (_buf == null || _buf.Width != Width || _buf.Height != Height)
+                {
+                    if (_buf != null) _buf.Dispose();
+                    _buf = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                }
+
+                Graphics g = Graphics.FromImage(_buf);
+                try
+                {
+                    g.Clear(Color.Transparent);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+                    Rectangle body = new Rectangle(MARGIN, MARGIN, Width - MARGIN * 2 - 1, Height - MARGIN * 2 - 1);
+                    int rad = Math.Min(9, body.Height / 2);
+
+                    for (int i = 6; i >= 1; i--)
+                    {
+                        Rectangle sh = body;
+                        sh.Inflate(i, i);
+                        sh.Offset(0, 1);
+                        using (GraphicsPath p = Gfx.Round(sh, rad + i))
+                        using (SolidBrush b = new SolidBrush(Color.FromArgb(light ? 14 : 22, 0, 0, 0)))
+                            g.FillPath(b, p);
+                    }
+
+                    using (GraphicsPath p = Gfx.Round(body, rad))
+                    {
+                        Color fill = light ? Color.FromArgb(248, 252, 253, 255) : Color.FromArgb(240, 30, 32, 37);
+                        Color rgb = light ? Color.FromArgb(252, 253, 255) : Color.FromArgb(30, 32, 37);
+                        using (SolidBrush b = new SolidBrush(fill)) g.FillPath(b, p);
+                        // 文字画在不透明底上再裁进圆角，避免分层画布上写 GDI 字出彩边
+                        g.SetClip(p);
+                        using (SolidBrush b2 = new SolidBrush(rgb)) g.FillPath(b2, p);
+                        Color ink = light ? Color.FromArgb(32, 34, 38) : Color.FromArgb(238, 240, 245);
+                        StringFormat sf = new StringFormat();
+                        sf.Alignment = StringAlignment.Center;
+                        sf.LineAlignment = StringAlignment.Center;
+                        sf.FormatFlags = StringFormatFlags.NoWrap;
+                        sf.Trimming = StringTrimming.EllipsisCharacter;
+                        g.DrawString(_txt, _font, new SolidBrush(ink), body, sf);
+                        sf.Dispose();
+                        g.ResetClip();
+                        using (Pen pen = new Pen(light ? Color.FromArgb(40, 0, 0, 0) : Color.FromArgb(30, 255, 255, 255)))
+                            g.DrawPath(pen, p);
+                    }
+                }
+                finally { g.Dispose(); }
+
+                PushLayered();
+            }
+            catch { }
+        }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        private struct BLEND { public byte Op, Flags, Alpha, Format; }
+
+        [DllImport("user32.dll")]
+        private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref Point pos, ref Size size,
+            IntPtr hdcSrc, ref Point src, int key, ref BLEND blend, int flags);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr h, IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr obj);
+
+        private void PushLayered()
+        {
+            if (_buf == null) return;
+            IntPtr scr = GetDC(IntPtr.Zero);
+            IntPtr mem = CreateCompatibleDC(scr);
+            IntPtr hb = _buf.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
+            IntPtr old = SelectObject(mem, hb);
+
+            Point pos = new Point(Left, Top);
+            Size size = new Size(_buf.Width, _buf.Height);
+            Point src = new Point(0, 0);
+            BLEND bl = new BLEND();
+            bl.Op = 0; bl.Flags = 0; bl.Alpha = 255; bl.Format = 1;
+            UpdateLayeredWindow(Handle, scr, ref pos, ref size, mem, ref src, 0, ref bl, 2);
+
+            SelectObject(mem, old);
+            DeleteObject(hb);
+            DeleteDC(mem);
+            ReleaseDC(IntPtr.Zero, scr);
         }
     }
 
@@ -2267,7 +2388,9 @@ namespace MyDock
             Point sp = PointToScreen(new Point(iconClient.X, iconClient.Y));
             Rectangle work = Screen.FromPoint(sp).WorkingArea;
             int x = sp.X + iconClient.Width / 2 - _chip.Width / 2;
-            int y = (_edge == DockEdge.Top) ? sp.Y + iconClient.Height + 6 : sp.Y - _chip.Height - 6;
+            int y = (_edge == DockEdge.Top)
+                    ? sp.Y + iconClient.Height + 6 - 10
+                    : sp.Y - _chip.Height + 10 - 6;
             if (x < work.Left + 2) x = work.Left + 2;
             if (x + _chip.Width > work.Right) x = work.Right - _chip.Width;
             if (y < work.Top + 2) y = work.Top + 2;
@@ -2278,7 +2401,7 @@ namespace MyDock
 
         private void HideNameChip()
         {
-            try { if (_chip != null && _chip.Visible) _chip.Hide(); }
+            try { if (_chip != null) _chip.HideChip(); }
             catch { }
         }
 

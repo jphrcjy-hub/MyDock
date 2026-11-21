@@ -2265,9 +2265,9 @@ namespace MyDock
             try
             {
                 _menuOpen = true;
-                // 贴着白条右侧弹出，纵向对齐鼠标
-                int ax = Left + _barRect.Right + 8;
-                Point anchor = new Point(ax, Cursor.Position.Y);
+                // 就在鼠标点击的位置弹出（ShowAt 里的锚点含 12px 阴影留白，先抵消掉）
+                Point cur = Cursor.Position;
+                Point anchor = new Point(cur.X - 12, cur.Y - 10);
                 _menu.ShowAt(anchor, MenuEntries());
             }
             catch (Exception ex) { Log.Write("menu err: " + ex.Message); }
